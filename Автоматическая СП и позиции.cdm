@@ -1,0 +1,560 @@
+# -*- coding: utf-8 -*-
+#~
+from decimal import Decimal, ROUND_05UP, ROUND_DOWN, ROUND_HALF_DOWN, ROUND_UP
+import math
+import pythoncom
+from win32com.client import Dispatch, gencache
+from collections import Counter
+from copy import deepcopy
+from itertools import groupby
+import LDefin2D
+import MiscellaneousHelpers as MH
+from tkinter import *
+from tkinter import messagebox as mb
+import win32api
+import win32con
+import win32gui
+##from pykeyboard import PyKeyboardс
+
+#  Подключим константы API Компас
+kompas6_constants = gencache.EnsureModule("{75C9F5D0-B5B8-4526-8681-9903C567D2ED}", 0, 1, 0).constants
+kompas6_constants_3d = gencache.EnsureModule("{2CAF168C-7961-4B90-9DA2-701419BEEFE3}", 0, 1, 0).constants
+
+#  Подключим описание интерфейсов API5
+kompas6_api5_module = gencache.EnsureModule("{0422828C-F174-495E-AC5D-D31014DBBE87}", 0, 1, 0)
+kompas_object = kompas6_api5_module.KompasObject(Dispatch("Kompas.Application.5")._oleobj_.QueryInterface(kompas6_api5_module.KompasObject.CLSID, pythoncom.IID_IDispatch))
+MH.iKompasObject  = kompas_object
+
+#  Подключим описание интерфейсов API7
+kompas_api7_module = gencache.EnsureModule("{69AC2981-37C0-4379-84FD-5DD2F3C0A520}", 0, 1, 0)
+application = kompas_api7_module.IApplication(Dispatch("Kompas.Application.7")._oleobj_.QueryInterface(kompas_api7_module.IApplication.CLSID, pythoncom.IID_IDispatch))
+MH.iApplication  = application
+
+
+Documents = application.Documents
+#  Получим активный документ
+kompas_document = application.ActiveDocument
+kompas_document_2d = kompas_api7_module.IKompasDocument2D(kompas_document)
+iDocument2D = kompas_object.ActiveDocument2D()
+
+module = gencache.EnsureModule("{69AC2981-37C0-4379-84FD-5DD2F3C0A520}", 0, 1, 0)
+api = module.IKompasAPIObject(Dispatch("Kompas.Application.7")._oleobj_.QueryInterface(module.IKompasAPIObject.CLSID, pythoncom.IID_IDispatch))
+const = gencache.EnsureModule("{75C9F5D0-B5B8-4526-8681-9903C567D2ED}", 0, 1, 0).constants
+
+class MetalSheet:
+    def __init__(self):
+        self.__position_num = 0
+        self.__number_of_things = 0
+        self.__X = 0.0
+        self.__Y = 0.0
+        self.__Height = 0
+        self.__Width = 0
+        self.__Style = 1
+        self.__Angle = 0
+        self.__area_id = 0
+        self.__is_not_correct = False
+
+    def __init__(self, X, Y, Height, Width, Style, Angle, position_num=0, number_of_things=0, area_id = 0, is_not_correct = False):
+        self.__position_num = position_num
+        self.__number_of_things = number_of_things
+        self.__X = X
+        self.__Y = Y
+        D_height = Decimal(Height)
+        self.__Height = D_height.quantize(Decimal("1"), ROUND_HALF_DOWN)
+        D_width = Decimal(Width)
+        self.__Width = D_width.quantize(Decimal("1"), ROUND_HALF_DOWN)
+        self.__Style = Style
+        self.__Angle = Angle
+        self.__area_id = area_id
+        self.__is_not_correct = is_not_correct
+
+    #Входит ли в габариты листа
+    @property
+    def is_not_correct(self):
+        return self.__is_not_correct
+    @is_not_correct.setter
+    def is_not_correct(self, is_not_correct):
+        self.__is_not_correct = is_not_correct
+    #ID
+    @property
+    def area_id(self):
+        return self.__area_id
+    @area_id.setter
+    def area_id(self, area_id):
+        self.__area_id = area_id
+    #Номер позиции
+    @property
+    def position_num(self):
+        return self.__position_num
+    @position_num.setter
+    def position_num(self, position_num):
+        self.__position_num = position_num
+    #Количество листов
+    @property
+    def number_of_things(self):
+        return self.__number_of_things
+    @number_of_things.setter
+    def number_of_things(self, number_of_things):
+        self.__number_of_things = number_of_things
+    #координата X
+    @property
+    def X(self):
+        return self.__X
+    @X.setter
+    def X(self, X):
+        self.__X = X
+    #координата Y
+    @property
+    def Y(self):
+        return self.__Y
+    @Y.setter
+    def Y(self, Y):
+        self.__Y = Y
+    #Угол
+    @property
+    def Angle(self):
+        return self.__Angle
+    @Angle.setter
+    def Angle(self, Angle):
+        self.__Angle = Angle
+    #Высота
+    @property
+    def Height(self):
+        return self.__Height
+    @Height.setter
+    def Height(self, Height):
+        D_height = Decimal(Height)
+        self.__Height = D_height.quantize(Decimal("1"), ROUND_HALF_DOWN)
+    #Ширина
+    @property
+    def Width(self):
+        return self.__Width
+    @Width.setter
+    def Width(self, Width):
+        D_width = Decimal(Width)
+        self.__Width = D_width.quantize(Decimal("1"), ROUND_HALF_DOWN)
+    #Стиль линии
+    @property
+    def Style(self):
+        return self.__Style
+    @Style.setter
+    def Style(self, Style):
+        self.__Style = Style
+
+    def get_area(self):
+        return abs(self.__Height * self.__Width )
+
+    def get_table_content(self):
+        return [self.__position_num, abs(self.__Height), abs(self.__Width), self.__number_of_things]
+
+
+
+""" Выделяем все объекты """
+hwnd = win32gui.FindWindow(None, "КОМПАС-3D v18.1")
+win32gui.SetForegroundWindow(hwnd)
+
+win32api.keybd_event(0x11, 0, 0, 0)
+win32api.keybd_event(0x41, 0, 0, 0)
+win32api.keybd_event(0x11, 0, win32con.KEYEVENTF_KEYUP, 0)
+win32api.keybd_event(0x41, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+
+app = api.Application
+doc = app.ActiveDocument #  если я в активном 2D документе
+doc2D = module.IKompasDocument2D(doc._oleobj_.QueryInterface(module.IKompasDocument2D.CLSID, pythoncom.IID_IDispatch))
+doc2D1 = module.IKompasDocument2D1(doc2D._oleobj_.QueryInterface(module.IKompasDocument2D1.CLSID, pythoncom.IID_IDispatch))
+selection_manager = doc2D1.SelectionManager
+selected_objects  = selection_manager.SelectedObjects
+
+list_of_rectangles = []
+if str(type(selected_objects)) == "<class 'win32com.gen_py.69AC2981-37C0-4379-84FD-5DD2F3C0A520x0x1x0.IRectangle'>" :
+    new_rectangle = module.IRectangle(selected_objects)
+    list_of_rectangles.append(new_rectangle)
+else:
+    if isinstance(selected_objects, tuple): #  выделяю несколько
+        for object in selected_objects:
+            if str(type(object)) == "<class 'win32com.gen_py.69AC2981-37C0-4379-84FD-5DD2F3C0A520x0x1x0.IRectangle'>" : # прямогульников
+                new_rectangle = module.IRectangle(object)
+                list_of_rectangles.append(new_rectangle)
+
+
+list_of_rectangles2 = [i for i in list_of_rectangles if i.Style == 1] #удаляю лишние прямоугольники (вырезы по месту)
+
+list_of_sheets = []#создаю новый тип MetalSheet
+for i in list_of_rectangles2:
+    new_sheet =  MetalSheet(i.X, i.Y, i.Height, i.Width, i.Style, i.Angle)
+    list_of_sheets.append(new_sheet)
+
+if len(list_of_sheets) == 0:
+    root = Tk()
+    root.withdraw()
+    mb.showerror("Ошибка", "Не выбраны листы для расчета")
+    import sys
+    exit(0)
+
+
+def sort_sheets_2(metalsheet):
+    return abs(metalsheet.Height * metalsheet.Width)
+
+list_of_sheets_temp = sorted(list_of_sheets, key = sort_sheets_2)#cортирую список по площади
+del list_of_sheets[:]
+list_of_sheets = list_of_sheets_temp
+
+list_for_count = []#Создаю список для индентификации
+for i in list_of_sheets:
+    if abs(i.Height) < abs(i.Width):
+        count = abs(int(i.Width)),abs(int(i.Height))
+    else:
+        count = abs(int(i.Height)),abs(int(i.Width))
+    list_for_count.append(count)
+
+number_of_things = Counter(list_for_count)#считаю количество элесентов по ID
+positions = deepcopy(number_of_things)#создаю копию словаря для создания позиций
+
+def sort_sheets_positions(i):
+    return i
+
+positions_temp = sorted(positions, key=sort_sheets_positions)
+
+pos = 0
+for key in positions_temp:
+    pos = pos+1
+    positions[key] = pos
+
+for i in range(len(list_of_sheets)):#присваиваю ID
+    list_of_sheets[i].area_id = list_for_count[i]
+
+for i in list_of_sheets:#присваиваю количетсво и позиции
+    if i.area_id in number_of_things.keys():
+        i.number_of_things = number_of_things[i.area_id]
+        i.position_num = positions[i.area_id]
+
+def sort_sheets(metalsheet):
+    return metalsheet.position_num
+
+sorted_list_of_sheets = sorted(list_of_sheets, key = sort_sheets)#отсортированный список для генерации выносок
+
+grouped_list_of_sheets = []#группированный список для СП
+for key, group_items in groupby(sorted_list_of_sheets, key=sort_sheets):
+    for item in group_items:
+        grouped_list_of_sheets.append(item)
+        group_items = list(group_items)
+        if len(group_items)==1:
+            break
+
+for i in grouped_list_of_sheets:
+    if (abs(i.Height) > 1250 or abs(i.Width) > 2500) and (abs(i.Height) > 2500 or abs(i.Width) > 1250):
+        i.is_not_correct = True
+
+list_of_wrong_sheets =[]
+list_of_wrong_sheets_2 = []
+for i in grouped_list_of_sheets:
+    if i.is_not_correct:
+        list_of_wrong_sheets.append('{0} x {1}'.format(abs(i.Height), abs(i.Width)))
+        list_of_wrong_sheets_2.append(i)
+
+if list_of_wrong_sheets != []:
+
+    text = "\n".join(list_of_wrong_sheets)
+    root = Tk()
+    root.withdraw()
+    messagebox = mb.askyesno("Предупреждение", "Листы с размерами: \n{0} \nне соотвествуют требованиям, \nпри создании таблицы они будут отмечены красным цветом. \nСоздать спецификацию и обозначения позиций?".format(text))
+else: messagebox = True
+
+if messagebox != True and list_of_sheets != []:
+    root = Tk()
+    root.withdraw()
+    mb2 = mb.showinfo("Шанс на исправление", "Вы получили дополнительную жизнь!\nТеперь вы можете исправить ошибки!")
+    for i in list_of_wrong_sheets_2:
+        iLeaderParam = kompas6_api5_module.ksLeaderParam(kompas_object.GetParamStruct(kompas6_constants.ko_LeaderParam))
+        iLeaderParam.Init()
+        iLeaderParam.around = 0
+        iLeaderParam.arrowType = 2
+        iLeaderParam.cText0 = 1
+        iLeaderParam.cText1 = 0
+        iLeaderParam.cText2 = 0
+        iLeaderParam.cText3 = 0
+        iLeaderParam.dirX = 1
+        iLeaderParam.signType = 0
+
+        if i.Height > 0 and i.Width > 0:
+            iLeaderParam.x = i.X + abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y + abs(float((i.Height/2)))
+        elif i.Height < 0 and i.Width < 0:
+            iLeaderParam.x = i.X - abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y - abs(float((i.Height/2)))
+        elif i.Height > 0 and i.Width < 0:
+            iLeaderParam.x = i.X - abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y + abs(float((i.Height/2)))
+        elif i.Height < 0 and i.Width > 0:
+            iLeaderParam.x = i.X + abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y - abs(float((i.Height/2)))
+
+        iPolylineArray = kompas6_api5_module.ksDynamicArray(iLeaderParam.GetpPolyline())
+        iMathPointArray = kompas_object.GetDynamicArray(LDefin2D.POINT_ARR)
+        iMathPointParam = kompas6_api5_module.ksMathPointParam(kompas_object.GetParamStruct(kompas6_constants.ko_MathPointParam))
+        iMathPointParam.Init()
+
+        iMathPointParam.x = iLeaderParam.x-50
+        iMathPointParam.y = iLeaderParam.y-50
+        iMathPointArray.ksAddArrayItem(-1, iMathPointParam)
+        iPolylineArray.ksAddArrayItem(-1, iMathPointArray)
+        iLeaderParam.SetpPolyline(iPolylineArray)
+        iTextLineArray = kompas6_api5_module.ksDynamicArray(iLeaderParam.GetpTextline())
+
+        iTextLineParam = kompas6_api5_module.ksTextLineParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextLineParam))
+        iTextLineParam.Init()
+        iTextLineParam.style = 6
+        iTextItemArray = kompas_object.GetDynamicArray(LDefin2D.TEXT_ITEM_ARR)
+        iTextItemParam = kompas6_api5_module.ksTextItemParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextItemParam))
+        iTextItemParam.Init()
+        iTextItemParam.iSNumb = 0
+        iTextItemParam.s = "ИСПРАВИТЬ!"
+        iTextItemParam.type = 0
+        iTextItemFont = kompas6_api5_module.ksTextItemFont(iTextItemParam.GetItemFont())
+        iTextItemFont.Init()
+        iTextItemFont.bitVector = 4096
+        iTextItemFont.color = 255
+        iTextItemFont.fontName = "GOST type A"
+        iTextItemFont.height = 5
+        iTextItemFont.ksu = 1
+        iTextItemArray.ksAddArrayItem(-1, iTextItemParam)
+        iTextLineParam.SetTextItemArr(iTextItemArray)
+
+        iTextLineArray.ksAddArrayItem(-1, iTextLineParam)
+        iLeaderParam.SetpTextline(iTextLineArray)
+        iCutLine = iDocument2D.ksLeader(iLeaderParam)
+else:
+##"""Создаем выноски!
+    for i in sorted_list_of_sheets:
+        iLeaderParam = kompas6_api5_module.ksLeaderParam(kompas_object.GetParamStruct(kompas6_constants.ko_LeaderParam))
+        iLeaderParam.Init()
+        iLeaderParam.around = 0
+        iLeaderParam.arrowType = 2
+        iLeaderParam.cText0 = 1
+        iLeaderParam.cText1 = 0
+        iLeaderParam.cText2 = 0
+        iLeaderParam.cText3 = 0
+        iLeaderParam.dirX = 1
+        iLeaderParam.signType = 0
+
+        if i.Height > 0 and i.Width > 0:
+            iLeaderParam.x = i.X + abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y + abs(float((i.Height/2)))
+        elif i.Height < 0 and i.Width < 0:
+            iLeaderParam.x = i.X - abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y - abs(float((i.Height/2)))
+        elif i.Height > 0 and i.Width < 0:
+            iLeaderParam.x = i.X - abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y + abs(float((i.Height/2)))
+        elif i.Height < 0 and i.Width > 0:
+            iLeaderParam.x = i.X + abs(float((i.Width/2)))
+            iLeaderParam.y = i.Y - abs(float((i.Height/2)))
+
+        iPolylineArray = kompas6_api5_module.ksDynamicArray(iLeaderParam.GetpPolyline())
+        iMathPointArray = kompas_object.GetDynamicArray(LDefin2D.POINT_ARR)
+        iMathPointParam = kompas6_api5_module.ksMathPointParam(kompas_object.GetParamStruct(kompas6_constants.ko_MathPointParam))
+        iMathPointParam.Init()
+
+        iMathPointParam.x = iLeaderParam.x-100
+        iMathPointParam.y = iLeaderParam.y-100
+        iMathPointArray.ksAddArrayItem(-1, iMathPointParam)
+        iPolylineArray.ksAddArrayItem(-1, iMathPointArray)
+        iLeaderParam.SetpPolyline(iPolylineArray)
+        iTextLineArray = kompas6_api5_module.ksDynamicArray(iLeaderParam.GetpTextline())
+
+        iTextLineParam = kompas6_api5_module.ksTextLineParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextLineParam))
+        iTextLineParam.Init()
+        iTextLineParam.style = 6
+        iTextItemArray = kompas_object.GetDynamicArray(LDefin2D.TEXT_ITEM_ARR)
+        iTextItemParam = kompas6_api5_module.ksTextItemParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextItemParam))
+        iTextItemParam.Init()
+        iTextItemParam.iSNumb = 0
+        iTextItemParam.s = i.position_num
+        iTextItemParam.type = 0
+        iTextItemFont = kompas6_api5_module.ksTextItemFont(iTextItemParam.GetItemFont())
+        iTextItemFont.Init()
+        iTextItemFont.bitVector = 4096
+        iTextItemFont.color = 0
+        iTextItemFont.fontName = "GOST type A"
+        iTextItemFont.height = 5
+        iTextItemFont.ksu = 1
+        iTextItemArray.ksAddArrayItem(-1, iTextItemParam)
+        iTextLineParam.SetTextItemArr(iTextItemArray)
+
+        iTextLineArray.ksAddArrayItem(-1, iTextLineParam)
+        iLeaderParam.SetpTextline(iTextLineArray)
+        iCutLine = iDocument2D.ksLeader(iLeaderParam)
+    ##Создаем выноски!"""
+
+    for i in grouped_list_of_sheets:
+        if abs(i.Height) < abs(i.Width):
+            i.Height, i.Width = i.Width, i.Height
+
+    if grouped_list_of_sheets != []:
+
+        the_hat = ["Позиция","Длина","Ширина","Количество"]
+        divide = lambda lst, size: [lst[i:i+size] for i in range(0, len(lst), size)]
+        divided_list_of_sheets = divide(grouped_list_of_sheets, 22)
+        x_start_table = 0
+        for division in range(len(divided_list_of_sheets)):
+            if division == 0:
+                x_start_table = 0
+            else:
+                x_start_table += 3400
+            iViewsAndLayersManager = kompas_document_2d.ViewsAndLayersManager
+            iViews = iViewsAndLayersManager.Views
+            iView = iViews.ActiveView
+            iSymbols2DContainer = iView._oleobj_.QueryInterface(kompas_api7_module.ISymbols2DContainer.CLSID, pythoncom.IID_IDispatch)
+            iSymbols2DContainer = kompas_api7_module.ISymbols2DContainer(iSymbols2DContainer)
+            iDrawingTables = iSymbols2DContainer.DrawingTables
+            iDrawingTable = iDrawingTables.Add((len(divided_list_of_sheets[division])+1), 4, 9, 50, kompas6_constants.ksTTLNotCreate)
+            iDrawingTable.Angle = 0
+            iDrawingTable.FixedCellsSize = False
+            iTable = iDrawingTable._oleobj_.QueryInterface(kompas_api7_module.ITable.CLSID, pythoncom.IID_IDispatch)
+            iTable = kompas_api7_module.ITable(iTable)
+
+            for column in the_hat:
+                iTableCell = iTable.Cell(0, the_hat.index(column))
+                iCellFormat = iTableCell._oleobj_.QueryInterface(kompas_api7_module.ICellFormat.CLSID, pythoncom.IID_IDispatch)
+                iCellFormat = kompas_api7_module.ICellFormat(iCellFormat)
+                iCellFormat.OneLine = False
+                iCellFormat.HFormat = kompas6_constants.ksHFormatStrNarrowing
+                iCellFormat.VFormat = True
+                iCellFormat.LeftEdge = 0.5
+                iCellFormat.RightEdge = -0.5
+                iCellFormat.SpaceAfter = 0
+                iCellFormat.SpaceBefore = 0
+                iCellFormat.ReadOnly = False
+                iCellFormat.TextStyle = 9
+                iCellFormat.Height = 11
+                iCellFormat.Width = 50
+                iTextObject = iTableCell.Text
+                iText = iTextObject._oleobj_.QueryInterface(kompas_api7_module.IText.CLSID, pythoncom.IID_IDispatch)
+                iText = kompas_api7_module.IText(iText)
+                iText.Clear()
+                iTextLine = iText.Add()
+                iTextLine.Align = kompas6_constants.ksAlignCenter
+                iTextLine.IndentedLine = 0
+                iTextLine.LeftEdge = 0
+                iTextLine.Level = 0
+                iTextLine.Numbering = 0
+                iTextLine.RightEdge = 0
+                iTextLine.StepAfterParagraph = 0
+                iTextLine.StepBeforeParagraph = 0
+                iTextLine.Step = 7
+                iTextLine.Style = 9
+                iTextItem = iTextLine.Add()
+                iTextItem.ItemType = kompas6_constants.ksTItString
+                iTextItem.NewLine = 1
+                iTextItem.Str = column
+                iTextItem.SymbolFontName = ""
+                iTextFont = iTextItem._oleobj_.QueryInterface(kompas_api7_module.ITextFont.CLSID, pythoncom.IID_IDispatch)
+                iTextFont = kompas_api7_module.ITextFont(iTextFont)
+                iTextFont.Bold = False
+                iTextFont.Color = 0
+                iTextFont.FontName = "GOST type A"
+                iTextFont.Height = 5
+                iTextFont.Italic = True
+                iTextFont.Underline = False
+                iTextFont.WidthFactor = 1
+                iTextItem.Update()
+
+            for i in range(len(divided_list_of_sheets[division])):
+                row = divided_list_of_sheets[division][i].get_table_content()
+                for column in range(len(row)):
+                    iTableCell = iTable.Cell(i+1, column)
+                    iCellFormat = iTableCell._oleobj_.QueryInterface(kompas_api7_module.ICellFormat.CLSID, pythoncom.IID_IDispatch)
+                    iCellFormat = kompas_api7_module.ICellFormat(iCellFormat)
+                    iCellFormat.OneLine = False
+                    iCellFormat.HFormat = kompas6_constants.ksHFormatStrNarrowing
+                    iCellFormat.VFormat = True
+                    iCellFormat.LeftEdge = 0.5
+                    iCellFormat.RightEdge = -0.5
+                    iCellFormat.SpaceAfter = 0
+                    iCellFormat.SpaceBefore = 0
+                    iCellFormat.ReadOnly = False
+                    iCellFormat.TextStyle = 9
+                    iCellFormat.Height = 11
+                    iCellFormat.Width = 50
+                    iTextObject = iTableCell.Text
+                    iText = iTextObject._oleobj_.QueryInterface(kompas_api7_module.IText.CLSID, pythoncom.IID_IDispatch)
+                    iText = kompas_api7_module.IText(iText)
+                    iText.Clear()
+                    iTextLine = iText.Add()
+                    iTextLine.Align = kompas6_constants.ksAlignCenter
+                    iTextLine.IndentedLine = 0
+                    iTextLine.LeftEdge = 0
+                    iTextLine.Level = 0
+                    iTextLine.Numbering = 0
+                    iTextLine.RightEdge = 0
+                    iTextLine.StepAfterParagraph = 0
+                    iTextLine.StepBeforeParagraph = 0
+                    iTextLine.Step = 7
+                    iTextLine.Style = 9
+                    iTextItem = iTextLine.Add()
+                    iTextItem.ItemType = kompas6_constants.ksTItString
+                    iTextItem.NewLine = 1
+                    iTextItem.Str = row[column]
+                    iTextItem.SymbolFontName = ""
+                    iTextFont = iTextItem._oleobj_.QueryInterface(kompas_api7_module.ITextFont.CLSID, pythoncom.IID_IDispatch)
+                    iTextFont = kompas_api7_module.ITextFont(iTextFont)
+                    iTextFont.Bold = False
+                    if divided_list_of_sheets[division][i].is_not_correct:
+                        iTextFont.Color = 255
+                    else:
+                        iTextFont.Color = 0
+                    iTextFont.FontName = "GOST type A"
+                    iTextFont.Height = 5
+                    iTextFont.Italic = True
+                    iTextFont.Underline = False
+                    iTextFont.WidthFactor = 1
+                    iTextItem.Update()
+
+            iDrawingTable.X = x_start_table
+            iDrawingTable.Y = 0
+            iDrawingTable.Update()
+
+iParagraphParam = kompas6_api5_module.ksParagraphParam(kompas_object.GetParamStruct(kompas6_constants.ko_ParagraphParam))
+iParagraphParam.Init()
+iParagraphParam.x = 0
+iParagraphParam.y = 200
+iParagraphParam.ang = 0
+iParagraphParam.height = 9
+iParagraphParam.width = 50
+iParagraphParam.hFormat = 0
+iParagraphParam.vFormat = 0
+iParagraphParam.style = 1
+iDocument2D.ksParagraph(iParagraphParam)
+
+iTextLineParam = kompas6_api5_module.ksTextLineParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextLineParam))
+iTextLineParam.Init()
+iTextLineParam.style = 1
+iTextItemArray = kompas_object.GetDynamicArray(LDefin2D.TEXT_ITEM_ARR)
+iTextItemParam = kompas6_api5_module.ksTextItemParam(kompas_object.GetParamStruct(kompas6_constants.ko_TextItemParam))
+iTextItemParam.Init()
+iTextItemParam.iSNumb = 0
+
+sum_of_areas = 0
+for i in sorted_list_of_sheets:
+    sum_of_areas += i.get_area()/1000000
+DENSITY_OF_STEEL = 7850 #кг/м3
+THICKNESS = 0.002 #м
+weight_of_sheets = int(sum_of_areas)*THICKNESS*DENSITY_OF_STEEL
+weight_of_sheets = math.ceil(weight_of_sheets)
+weight_of_sheets_str = "Общая масса листов: {0} кг\nОбщая площадь листов: {1} м2".format(weight_of_sheets, round(sum_of_areas, 1))
+
+iTextItemParam.s = weight_of_sheets_str
+iTextItemParam.type = 0
+iTextItemFont = kompas6_api5_module.ksTextItemFont(iTextItemParam.GetItemFont())
+iTextItemFont.Init()
+iTextItemFont.bitVector = 4096
+iTextItemFont.color = 0
+iTextItemFont.fontName = "GOST type A"
+iTextItemFont.height = 10
+iTextItemFont.ksu = 1
+iTextItemArray.ksAddArrayItem(-1, iTextItemParam)
+iTextLineParam.SetTextItemArr(iTextItemArray)
+
+iDocument2D.ksTextLine(iTextLineParam)
+obj = iDocument2D.ksEndObj()
